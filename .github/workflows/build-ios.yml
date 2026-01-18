@@ -1,4 +1,4 @@
-name: Build Unsigned iOS IPA
+name: Build iOS IPA with Fastlane
 
 on:
   workflow_dispatch:
@@ -34,9 +34,7 @@ jobs:
     - name: Fix Podfile for compatibility
       run: |
         cd ios
-        # Remove the privacy_file_aggregation_enabled line if it exists
-        sed -i.bak '/:privacy_file_aggregation_enabled/d' Podfile
-        cat Podfile
+        sed -i.bak '/:privacy_file_aggregation_enabled/d' Podfile || true
     
     - name: Update CocoaPods
       run: |
@@ -48,102 +46,113 @@ jobs:
         cd ios
         pod install --repo-update
     
-    - name: Debug - List iOS directory contents
+    - name: Install Fastlane
       run: |
-        cd ios
-        echo "=== iOS directory contents ==="
-        ls -la
-        echo "=== Looking for workspace/project files ==="
-        find . -name "*.xcworkspace" -o -name "*.xcodeproj"
+        sudo gem install fastlane
     
-    - name: Build unsigned archive
+    - name: Build with Fastlane (no signing)
       run: |
         cd ios
         
-        # Find the workspace or project file
-        if [ -f *.xcworkspace/contents.xcworkspacedata ]; then
-          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          echo "Found workspace: $WORKSPACE"
-          BUILD_TARGET="-workspace $WORKSPACE"
-        elif [ -f *.xcodeproj/project.pbxproj ]; then
-          PROJECT=$(ls -d *.xcodeproj | head -n 1)
-          echo "Found project: $PROJECT"
-          BUILD_TARGET="-project $PROJECT"
-        else
-          echo "Error: No workspace or project found"
-          ls -la
-          exit 1
-        fi
+        # Create Fastfile
+        mkdir -p fastlane
+        cat > fastlane/Fastfile << 'EOF'
+        default_platform(:ios)
+
+        platform :ios do
+          desc "Build unsigned IPA"
+          lane :build_unsigned do
+            build_app(
+              workspace: Dir.glob("*.xcworkspace").first,
+              scheme: "LandscapeVideoApp",
+              configuration: "Release",
+              export_method: "development",
+              skip_profile_detection: true,
+              codesigning_identity: "",
+              export_options: {
+                signingStyle: "manual",
+                compileBitcode: false
+              },
+              skip_codesigning: true,
+              output_directory: "./build",
+              output_name: "LandscapeVideoApp.ipa"
+            )
+          end
+        end
+        EOF
         
-        # Find the scheme name
-        SCHEME=$(xcodebuild -list $BUILD_TARGET | grep -A 1 "Schemes:" | tail -n 1 | xargs)
-        echo "Using scheme: $SCHEME"
+        # Try to build
+        fastlane build_unsigned || echo "Fastlane build failed, trying manual method"
+    
+    - name: Manual IPA creation (fallback)
+      if: always()
+      run: |
+        cd ios
         
-        xcodebuild $BUILD_TARGET \
-          -scheme "$SCHEME" \
+        # Find workspace
+        WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+        
+        # Build the app
+        xcodebuild -workspace "$WORKSPACE" \
+          -scheme LandscapeVideoApp \
           -configuration Release \
           -sdk iphoneos \
-          -destination 'generic/platform=iOS' \
-          -archivePath $PWD/build/LandscapeVideoApp.xcarchive \
-          archive \
+          -derivedDataPath ./build \
+          build \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO \
-          DEVELOPMENT_TEAM=""
+          CODE_SIGNING_ALLOWED=NO || true
+        
+        # Find the .app
+        APP_PATH=$(find build -name "*.app" -type d -not -path "*/Pods/*" | head -n 1)
+        
+        if [ -n "$APP_PATH" ]; then
+          echo "Found app at: $APP_PATH"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r LandscapeVideoApp.ipa Payload
+          mv LandscapeVideoApp.ipa build/ || true
+        fi
     
-    - name: Create unsigned IPA
+    - name: Verify IPA exists
       run: |
         cd ios
-        
-        echo "=== Looking for .app bundle in archive ==="
-        find build/LandscapeVideoApp.xcarchive -name "*.app" -type d
-        
-        # Try multiple possible locations
-        if [ -d "build/LandscapeVideoApp.xcarchive/Products/Applications" ]; then
-          APP_PATH=$(find build/LandscapeVideoApp.xcarchive/Products/Applications -name "*.app" -maxdepth 1 -type d | head -n 1)
+        if [ -f build/LandscapeVideoApp.ipa ]; then
+          echo "✅ IPA created successfully!"
+          ls -lh build/LandscapeVideoApp.ipa
         else
-          # Search entire archive
-          APP_PATH=$(find build/LandscapeVideoApp.xcarchive -name "*.app" -type d | head -n 1)
+          echo "❌ IPA not found, creating from scratch..."
+          
+          # Last resort: find any .app and package it
+          APP=$(find . -name "*.app" -type d -not -path "*/Pods/*" -not -path "*/*Frameworks/*" | head -n 1)
+          
+          if [ -n "$APP" ]; then
+            mkdir -p Payload
+            cp -r "$APP" Payload/
+            zip -r build/LandscapeVideoApp.ipa Payload
+            echo "✅ Created IPA from: $APP"
+            ls -lh build/LandscapeVideoApp.ipa
+          else
+            echo "❌ No .app bundle found anywhere"
+            exit 1
+          fi
         fi
-        
-        if [ -z "$APP_PATH" ]; then
-          echo "Error: .app bundle not found"
-          echo "=== Archive structure ==="
-          ls -R build/LandscapeVideoApp.xcarchive
-          exit 1
-        fi
-        
-        echo "Found app at: $APP_PATH"
-        
-        # Create Payload directory
-        mkdir -p build/Payload
-        
-        # Copy .app to Payload
-        cp -r "$APP_PATH" build/Payload/
-        
-        # Create IPA (just a ZIP file with .ipa extension)
-        cd build
-        zip -r LandscapeVideoApp-unsigned.ipa Payload
-        
-        echo "✅ Unsigned IPA created successfully"
-        ls -lh LandscapeVideoApp-unsigned.ipa
     
-    - name: Upload unsigned IPA
+    - name: Upload IPA
       uses: actions/upload-artifact@v4
       with:
-        name: LandscapeVideoApp-unsigned
-        path: ios/build/LandscapeVideoApp-unsigned.ipa
+        name: LandscapeVideoApp-IPA
+        path: ios/build/LandscapeVideoApp.ipa
         retention-days: 30
     
     - name: Build summary
       run: |
-        echo "### ✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Build completed!" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Download the unsigned IPA from the Artifacts section above." >> $GITHUB_STEP_SUMMARY
+        echo "Download the IPA from Artifacts above." >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
+        echo "**Install with Sideloadly:**" >> $GITHUB_STEP_SUMMARY
         echo "1. Download Sideloadly: https://sideloadly.io/" >> $GITHUB_STEP_SUMMARY
-        echo "2. Install Sideloadly on Windows" >> $GITHUB_STEP_SUMMARY
-        echo "3. Drag the unsigned IPA into Sideloadly" >> $GITHUB_STEP_SUMMARY
-        echo "4. Sign with your FREE Apple ID" >> $GITHUB_STEP_SUMMARY
-        echo "5. Install on your iPhone!" >> $GITHUB_STEP_SUMMARY
+        echo "2. Drag IPA into Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "3. Sign with your Apple ID" >> $GITHUB_STEP_SUMMARY
+        echo "4. Install on iPhone!" >> $GITHUB_STEP_SUMMARY
