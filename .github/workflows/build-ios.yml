@@ -1,61 +1,96 @@
 name: Build Unsigned iOS IPA
 
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: macos-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Setup Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '20'
+        cache: 'npm'
     
     - name: Install dependencies
       run: npm install
     
     - name: Install Expo CLI
-      run: npm install -g expo-cli
+      run: npm install -g @expo/cli
     
     - name: Prebuild iOS project
-      run: npx expo prebuild --platform ios
+      run: npx expo prebuild --platform ios --clean
     
-    - name: Install CocoaPods
+    - name: Install CocoaPods dependencies
       run: |
         cd ios
         pod install
     
-    - name: Build unsigned IPA
+    - name: Build unsigned archive
       run: |
         cd ios
         xcodebuild -workspace LandscapeVideoApp.xcworkspace \
           -scheme LandscapeVideoApp \
           -configuration Release \
           -sdk iphoneos \
-          -archivePath build/LandscapeVideoApp.xcarchive \
+          -destination 'generic/platform=iOS' \
+          -archivePath $PWD/build/LandscapeVideoApp.xcarchive \
           archive \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_ALLOWED=NO \
+          DEVELOPMENT_TEAM=""
+    
+    - name: Create unsigned IPA
+      run: |
+        cd ios
         
-        # Create Payload folder
+        # Find the .app bundle
+        APP_PATH=$(find build/LandscapeVideoApp.xcarchive/Products/Applications -name "*.app" -maxdepth 1 | head -n 1)
+        
+        if [ -z "$APP_PATH" ]; then
+          echo "Error: .app bundle not found"
+          exit 1
+        fi
+        
+        echo "Found app at: $APP_PATH"
+        
+        # Create Payload directory
         mkdir -p build/Payload
         
         # Copy .app to Payload
-        cp -r build/LandscapeVideoApp.xcarchive/Products/Applications/LandscapeVideoApp.app build/Payload/
+        cp -r "$APP_PATH" build/Payload/
         
-        # Create IPA (just a zip)
+        # Create IPA (just a ZIP file with .ipa extension)
         cd build
         zip -r LandscapeVideoApp-unsigned.ipa Payload
+        
+        echo "✅ Unsigned IPA created successfully"
+        ls -lh LandscapeVideoApp-unsigned.ipa
     
-    - name: Upload IPA
-      uses: actions/upload-artifact@v3
+    - name: Upload unsigned IPA
+      uses: actions/upload-artifact@v4
       with:
-        name: unsigned-ipa
+        name: LandscapeVideoApp-unsigned
         path: ios/build/LandscapeVideoApp-unsigned.ipa
+        retention-days: 30
+    
+    - name: Build summary
+      run: |
+        echo "### ✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Download the unsigned IPA from the Artifacts section above." >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
+        echo "1. Download Sideloadly: https://sideloadly.io/" >> $GITHUB_STEP_SUMMARY
+        echo "2. Install Sideloadly on Windows" >> $GITHUB_STEP_SUMMARY
+        echo "3. Drag the unsigned IPA into Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "4. Sign with your FREE Apple ID" >> $GITHUB_STEP_SUMMARY
+        echo "5. Install on your iPhone!" >> $GITHUB_STEP_SUMMARY
