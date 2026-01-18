@@ -48,6 +48,18 @@ jobs:
         cd ios
         # Remove problematic privacy setting if it exists
         sed -i.bak '/:privacy_file_aggregation_enabled/d' Podfile 2>/dev/null || true
+        
+        # Add use_modular_headers! to fix Swift pod integration
+        if ! grep -q "use_modular_headers!" Podfile; then
+          echo "Adding use_modular_headers! to Podfile"
+          # Add after the platform line
+          sed -i.bak2 "/platform :ios/a\\
+use_modular_headers!
+" Podfile
+        fi
+        
+        echo "=== Updated Podfile ==="
+        cat Podfile
     
     - name: Install CocoaPods
       run: |
