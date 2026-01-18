@@ -1,4 +1,4 @@
-name: Build iOS IPA with Fastlane
+name: Build iOS IPA (No Signing Required)
 
 on:
   workflow_dispatch:
@@ -46,113 +46,96 @@ jobs:
         cd ios
         pod install --repo-update
     
-    - name: Install Fastlane
+    - name: List iOS contents
       run: |
-        sudo gem install fastlane
+        cd ios
+        echo "=== Workspace/Project files ==="
+        ls -la *.xcworkspace *.xcodeproj 2>/dev/null || echo "None found"
     
-    - name: Build with Fastlane (no signing)
+    - name: Build app without code signing
       run: |
         cd ios
         
-        # Create Fastfile
-        mkdir -p fastlane
-        cat > fastlane/Fastfile << 'EOF'
-        default_platform(:ios)
-
-        platform :ios do
-          desc "Build unsigned IPA"
-          lane :build_unsigned do
-            build_app(
-              workspace: Dir.glob("*.xcworkspace").first,
-              scheme: "LandscapeVideoApp",
-              configuration: "Release",
-              export_method: "development",
-              skip_profile_detection: true,
-              codesigning_identity: "",
-              export_options: {
-                signingStyle: "manual",
-                compileBitcode: false
-              },
-              skip_codesigning: true,
-              output_directory: "./build",
-              output_name: "LandscapeVideoApp.ipa"
-            )
-          end
-        end
-        EOF
+        # Find the workspace
+        WORKSPACE=$(ls -d *.xcworkspace 2>/dev/null | head -n 1)
         
-        # Try to build
-        fastlane build_unsigned || echo "Fastlane build failed, trying manual method"
-    
-    - name: Manual IPA creation (fallback)
-      if: always()
-      run: |
-        cd ios
+        if [ -z "$WORKSPACE" ]; then
+          echo "❌ No workspace found"
+          exit 1
+        fi
         
-        # Find workspace
-        WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+        echo "Using workspace: $WORKSPACE"
         
-        # Build the app
+        # Build for device without signing
         xcodebuild -workspace "$WORKSPACE" \
-          -scheme LandscapeVideoApp \
+          -scheme GTAVI \
           -configuration Release \
           -sdk iphoneos \
           -derivedDataPath ./build \
           build \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO || true
+          CODE_SIGNING_ALLOWED=NO \
+          ONLY_ACTIVE_ARCH=NO
         
-        # Find the .app
-        APP_PATH=$(find build -name "*.app" -type d -not -path "*/Pods/*" | head -n 1)
-        
-        if [ -n "$APP_PATH" ]; then
-          echo "Found app at: $APP_PATH"
-          mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
-          zip -r LandscapeVideoApp.ipa Payload
-          mv LandscapeVideoApp.ipa build/ || true
-        fi
+        echo "✅ Build completed"
     
-    - name: Verify IPA exists
+    - name: Find and package .app into IPA
       run: |
         cd ios
-        if [ -f build/LandscapeVideoApp.ipa ]; then
-          echo "✅ IPA created successfully!"
-          ls -lh build/LandscapeVideoApp.ipa
-        else
-          echo "❌ IPA not found, creating from scratch..."
-          
-          # Last resort: find any .app and package it
-          APP=$(find . -name "*.app" -type d -not -path "*/Pods/*" -not -path "*/*Frameworks/*" | head -n 1)
-          
-          if [ -n "$APP" ]; then
-            mkdir -p Payload
-            cp -r "$APP" Payload/
-            zip -r build/LandscapeVideoApp.ipa Payload
-            echo "✅ Created IPA from: $APP"
-            ls -lh build/LandscapeVideoApp.ipa
-          else
-            echo "❌ No .app bundle found anywhere"
-            exit 1
-          fi
+        
+        echo "=== Searching for .app bundle ==="
+        find build -name "*.app" -type d -not -path "*/Pods/*"
+        
+        # Find the .app bundle
+        APP_PATH=$(find build -name "*.app" -type d -not -path "*/Pods/*" -not -path "*/PlugIns/*" | head -n 1)
+        
+        if [ -z "$APP_PATH" ]; then
+          echo "❌ No .app bundle found"
+          echo "=== Build directory structure ==="
+          ls -R build
+          exit 1
         fi
+        
+        echo "✅ Found app at: $APP_PATH"
+        
+        # Create Payload directory
+        mkdir -p Payload
+        
+        # Copy .app to Payload
+        cp -r "$APP_PATH" Payload/
+        
+        # Verify the copy
+        ls -la Payload/
+        
+        # Create IPA (just a ZIP file)
+        zip -r GTAVI.ipa Payload
+        
+        # Move to build folder
+        mkdir -p build
+        mv GTAVI.ipa build/
+        
+        echo "✅ IPA created successfully!"
+        ls -lh build/GTAVI.ipa
     
     - name: Upload IPA
       uses: actions/upload-artifact@v4
       with:
-        name: LandscapeVideoApp-IPA
-        path: ios/build/LandscapeVideoApp.ipa
+        name: GTAVI-IPA
+        path: ios/build/GTAVI.ipa
         retention-days: 30
     
     - name: Build summary
       run: |
-        echo "### ✅ Build completed!" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Download the IPA from Artifacts above." >> $GITHUB_STEP_SUMMARY
+        echo "Download the IPA from the Artifacts section above." >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Install with Sideloadly:**" >> $GITHUB_STEP_SUMMARY
+        echo "**To install on your iPhone:**" >> $GITHUB_STEP_SUMMARY
         echo "1. Download Sideloadly: https://sideloadly.io/" >> $GITHUB_STEP_SUMMARY
-        echo "2. Drag IPA into Sideloadly" >> $GITHUB_STEP_SUMMARY
-        echo "3. Sign with your Apple ID" >> $GITHUB_STEP_SUMMARY
-        echo "4. Install on iPhone!" >> $GITHUB_STEP_SUMMARY
+        echo "2. Install Sideloadly on Windows" >> $GITHUB_STEP_SUMMARY
+        echo "3. Download the IPA artifact from this workflow" >> $GITHUB_STEP_SUMMARY
+        echo "4. Drag the IPA into Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "5. Connect your iPhone via USB" >> $GITHUB_STEP_SUMMARY
+        echo "6. Enter your FREE Apple ID in Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "7. Click Start - Sideloadly will sign and install!" >> $GITHUB_STEP_SUMMARY
