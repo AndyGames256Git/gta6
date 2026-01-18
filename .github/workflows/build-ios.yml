@@ -71,16 +71,38 @@ jobs:
         
         echo "Building with workspace: $WORKSPACE"
         
-        # Build for iOS Simulator (doesn't require signing)
+        # List available schemes
+        echo "=== Available schemes ==="
+        xcodebuild -workspace "$WORKSPACE" -list
+        
+        # Get the actual scheme name
+        SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 100 "Schemes:" | grep -v "Schemes:" | head -n 1 | xargs)
+        echo "Using scheme: $SCHEME"
+        
+        # Build for generic iOS device first (creates proper binary)
+        echo "=== Building for iOS device ==="
         xcodebuild -workspace "$WORKSPACE" \
-          -scheme GTAVI \
+          -scheme "$SCHEME" \
           -configuration Release \
-          -sdk iphonesimulator \
+          -sdk iphoneos \
+          -destination 'generic/platform=iOS' \
           -derivedDataPath ./build \
           clean build \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_ALLOWED=NO \
+          DEVELOPMENT_TEAM="" \
+          PROVISIONING_PROFILE_SPECIFIER="" || {
+            echo "⚠️  Device build failed, trying simulator..."
+            
+            # Fallback to simulator
+            xcodebuild -workspace "$WORKSPACE" \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -sdk iphonesimulator \
+              -derivedDataPath ./build \
+              clean build
+          }
         
         echo "✅ Build completed successfully"
     
