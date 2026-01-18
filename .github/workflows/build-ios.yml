@@ -1,4 +1,4 @@
-name: Build iOS IPA (No Signing Required)
+name: Build Unsigned iOS IPA
 
 on:
   workflow_dispatch:
@@ -22,120 +22,155 @@ jobs:
     - name: Install dependencies
       run: npm install
     
-    - name: Install Expo CLI globally
+    - name: Install Expo CLI
       run: npm install -g @expo/cli
     
-    - name: Fix permissions
-      run: chmod +x node_modules/.bin/expo || true
-    
     - name: Prebuild iOS project
-      run: npx --yes @expo/cli prebuild --platform ios --clean
+      run: npx expo prebuild --platform ios --clean
     
-    - name: Fix Podfile for compatibility
+    - name: Fix Podfile compatibility
       run: |
         cd ios
-        sed -i.bak '/:privacy_file_aggregation_enabled/d' Podfile || true
+        # Remove problematic privacy setting if it exists
+        sed -i.bak '/:privacy_file_aggregation_enabled/d' Podfile 2>/dev/null || true
     
-    - name: Update CocoaPods
-      run: |
-        sudo gem install cocoapods
-        pod --version
-    
-    - name: Install CocoaPods dependencies
+    - name: Install CocoaPods
       run: |
         cd ios
         pod install --repo-update
     
-    - name: List iOS contents
+    - name: List generated files
       run: |
         cd ios
-        echo "=== Workspace/Project files ==="
-        ls -la *.xcworkspace *.xcodeproj 2>/dev/null || echo "None found"
+        echo "=== Generated files ==="
+        ls -la
+        echo ""
+        echo "=== Workspaces ==="
+        ls -la *.xcworkspace 2>/dev/null || echo "No workspace found"
     
-    - name: Build app without code signing
+    - name: Build for iOS Simulator (no signing required)
       run: |
         cd ios
         
-        # Find the workspace
+        # Find workspace
         WORKSPACE=$(ls -d *.xcworkspace 2>/dev/null | head -n 1)
         
         if [ -z "$WORKSPACE" ]; then
-          echo "❌ No workspace found"
+          echo "❌ No Xcode workspace found!"
           exit 1
         fi
         
-        echo "Using workspace: $WORKSPACE"
+        echo "Building with workspace: $WORKSPACE"
         
-        # Build for device without signing
+        # Build for iOS Simulator (doesn't require signing)
         xcodebuild -workspace "$WORKSPACE" \
           -scheme GTAVI \
           -configuration Release \
-          -sdk iphoneos \
+          -sdk iphonesimulator \
           -derivedDataPath ./build \
-          build \
+          clean build \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO \
-          ONLY_ACTIVE_ARCH=NO
+          CODE_SIGNING_ALLOWED=NO
         
-        echo "✅ Build completed"
+        echo "✅ Build completed successfully"
     
-    - name: Find and package .app into IPA
+    - name: Locate .app bundle
       run: |
         cd ios
         
         echo "=== Searching for .app bundle ==="
-        find build -name "*.app" -type d -not -path "*/Pods/*"
+        find build -name "*.app" -type d -not -path "*/Pods/*" -not -path "*/PlugIns/*"
         
-        # Find the .app bundle
-        APP_PATH=$(find build -name "*.app" -type d -not -path "*/Pods/*" -not -path "*/PlugIns/*" | head -n 1)
+        APP_PATH=$(find build -name "*.app" -type d -not -path "*/Pods/*" -not -path "*/PlugIns/*" | grep -v "Frameworks" | head -n 1)
         
         if [ -z "$APP_PATH" ]; then
-          echo "❌ No .app bundle found"
-          echo "=== Build directory structure ==="
-          ls -R build
+          echo "❌ .app bundle not found!"
+          echo "=== Full build directory ==="
+          ls -R build | head -100
           exit 1
         fi
         
-        echo "✅ Found app at: $APP_PATH"
+        echo "✅ Found .app at: $APP_PATH"
+        echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+    
+    - name: Create IPA package
+      run: |
+        cd ios
         
-        # Create Payload directory
+        echo "Creating IPA from: $APP_PATH"
+        
+        # Create Payload directory (required for IPA structure)
         mkdir -p Payload
         
-        # Copy .app to Payload
+        # Copy .app bundle into Payload
         cp -r "$APP_PATH" Payload/
         
-        # Verify the copy
+        # Verify contents
+        echo "=== Payload contents ==="
         ls -la Payload/
         
-        # Create IPA (just a ZIP file)
-        zip -r GTAVI.ipa Payload
+        # Create IPA (it's just a zip file with .ipa extension)
+        zip -r -q GTAVI.ipa Payload
         
-        # Move to build folder
-        mkdir -p build
-        mv GTAVI.ipa build/
+        # Verify IPA was created
+        if [ ! -f GTAVI.ipa ]; then
+          echo "❌ Failed to create IPA!"
+          exit 1
+        fi
         
         echo "✅ IPA created successfully!"
-        ls -lh build/GTAVI.ipa
+        ls -lh GTAVI.ipa
+        
+        # Show file info
+        file GTAVI.ipa
     
-    - name: Upload IPA
+    - name: Upload IPA artifact
       uses: actions/upload-artifact@v4
       with:
-        name: GTAVI-IPA
-        path: ios/build/GTAVI.ipa
+        name: GTAVI-Unsigned-IPA
+        path: ios/GTAVI.ipa
         retention-days: 30
     
     - name: Build summary
       run: |
-        echo "### ✅ Build completed successfully!" >> $GITHUB_STEP_SUMMARY
+        echo "### ✅ Unsigned IPA Built Successfully!" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Download the IPA from the Artifacts section above." >> $GITHUB_STEP_SUMMARY
+        echo "**Download your IPA from the Artifacts section above** ⬆️" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**To install on your iPhone:**" >> $GITHUB_STEP_SUMMARY
-        echo "1. Download Sideloadly: https://sideloadly.io/" >> $GITHUB_STEP_SUMMARY
-        echo "2. Install Sideloadly on Windows" >> $GITHUB_STEP_SUMMARY
-        echo "3. Download the IPA artifact from this workflow" >> $GITHUB_STEP_SUMMARY
-        echo "4. Drag the IPA into Sideloadly" >> $GITHUB_STEP_SUMMARY
-        echo "5. Connect your iPhone via USB" >> $GITHUB_STEP_SUMMARY
-        echo "6. Enter your FREE Apple ID in Sideloadly" >> $GITHUB_STEP_SUMMARY
-        echo "7. Click Start - Sideloadly will sign and install!" >> $GITHUB_STEP_SUMMARY
+        echo "---" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📲 Install on Your iPhone:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Step 1: Download Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "- Windows: https://sideloadly.io/" >> $GITHUB_STEP_SUMMARY
+        echo "- Download and install on your PC" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Step 2: Get App-Specific Password" >> $GITHUB_STEP_SUMMARY
+        echo "1. Go to: https://appleid.apple.com/" >> $GITHUB_STEP_SUMMARY
+        echo "2. Sign in with your Apple ID" >> $GITHUB_STEP_SUMMARY
+        echo "3. Security → App-Specific Passwords" >> $GITHUB_STEP_SUMMARY
+        echo "4. Generate password (name it 'Sideloadly')" >> $GITHUB_STEP_SUMMARY
+        echo "5. Copy the password" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Step 3: Install with Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "1. Connect iPhone to PC via USB" >> $GITHUB_STEP_SUMMARY
+        echo "2. Open Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "3. Drag GTAVI.ipa into Sideloadly" >> $GITHUB_STEP_SUMMARY
+        echo "4. Enter your Apple ID email" >> $GITHUB_STEP_SUMMARY
+        echo "5. Enter the app-specific password" >> $GITHUB_STEP_SUMMARY
+        echo "6. Click 'Start'" >> $GITHUB_STEP_SUMMARY
+        echo "7. Wait for installation to complete!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Step 4: Trust the App" >> $GITHUB_STEP_SUMMARY
+        echo "1. On iPhone: Settings → General → VPN & Device Management" >> $GITHUB_STEP_SUMMARY
+        echo "2. Tap your Apple ID" >> $GITHUB_STEP_SUMMARY
+        echo "3. Tap 'Trust'" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Step 5: Enable Developer Mode (iOS 16+)" >> $GITHUB_STEP_SUMMARY
+        echo "1. Settings → Privacy & Security → Developer Mode" >> $GITHUB_STEP_SUMMARY
+        echo "2. Toggle ON and restart iPhone" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🎮 **Your GTA VI loading screen app is ready!**" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "⚠️ **Note:** Apps signed with free Apple ID expire after 7 days. Just re-sign with Sideloadly to refresh!" >> $GITHUB_STEP_SUMMARY
