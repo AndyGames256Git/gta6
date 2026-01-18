@@ -1,0 +1,61 @@
+name: Build Unsigned iOS IPA
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm install
+    
+    - name: Install Expo CLI
+      run: npm install -g expo-cli
+    
+    - name: Prebuild iOS project
+      run: npx expo prebuild --platform ios
+    
+    - name: Install CocoaPods
+      run: |
+        cd ios
+        pod install
+    
+    - name: Build unsigned IPA
+      run: |
+        cd ios
+        xcodebuild -workspace LandscapeVideoApp.xcworkspace \
+          -scheme LandscapeVideoApp \
+          -configuration Release \
+          -sdk iphoneos \
+          -archivePath build/LandscapeVideoApp.xcarchive \
+          archive \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+        
+        # Create Payload folder
+        mkdir -p build/Payload
+        
+        # Copy .app to Payload
+        cp -r build/LandscapeVideoApp.xcarchive/Products/Applications/LandscapeVideoApp.app build/Payload/
+        
+        # Create IPA (just a zip)
+        cd build
+        zip -r LandscapeVideoApp-unsigned.ipa Payload
+    
+    - name: Upload IPA
+      uses: actions/upload-artifact@v3
+      with:
+        name: unsigned-ipa
+        path: ios/build/LandscapeVideoApp-unsigned.ipa
