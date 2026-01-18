@@ -71,40 +71,38 @@ jobs:
         
         echo "Building with workspace: $WORKSPACE"
         
-        # List available schemes
-        echo "=== Available schemes ==="
-        xcodebuild -workspace "$WORKSPACE" -list
-        
-        # Get the actual scheme name
-        SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | grep -A 100 "Schemes:" | grep -v "Schemes:" | head -n 1 | xargs)
-        echo "Using scheme: $SCHEME"
-        
-        # Build for generic iOS device first (creates proper binary)
-        echo "=== Building for iOS device ==="
-        xcodebuild -workspace "$WORKSPACE" \
-          -scheme "$SCHEME" \
-          -configuration Release \
-          -sdk iphoneos \
-          -destination 'generic/platform=iOS' \
-          -derivedDataPath ./build \
-          clean build \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO \
-          DEVELOPMENT_TEAM="" \
-          PROVISIONING_PROFILE_SPECIFIER="" || {
-            echo "⚠️  Device build failed, trying simulator..."
+        # Try common scheme names
+        for SCHEME in "GTAVI" "gta-vi" "gtavi" $(basename "$WORKSPACE" .xcworkspace); do
+          echo "=== Checking if scheme exists: $SCHEME ==="
+          
+          if xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -showBuildSettings > /dev/null 2>&1; then
+            echo "✅ Found valid scheme: $SCHEME"
             
-            # Fallback to simulator
+            # Build for simulator (most reliable)
+            echo "=== Building for iOS Simulator ==="
             xcodebuild -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
               -configuration Release \
               -sdk iphonesimulator \
+              -arch x86_64 \
               -derivedDataPath ./build \
-              clean build
-          }
-        
-        echo "✅ Build completed successfully"
+              build || {
+                echo "⚠️  x86_64 failed, trying arm64..."
+                xcodebuild -workspace "$WORKSPACE" \
+                  -scheme "$SCHEME" \
+                  -configuration Release \
+                  -sdk iphonesimulator \
+                  -arch arm64 \
+                  -derivedDataPath ./build \
+                  build
+              }
+            
+            echo "✅ Build completed successfully"
+            break
+          else
+            echo "❌ Scheme '$SCHEME' not found, trying next..."
+          fi
+        done
     
     - name: Locate .app bundle
       run: |
