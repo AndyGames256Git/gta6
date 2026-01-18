@@ -52,14 +52,12 @@ jobs:
         # Add use_modular_headers! to fix Swift pod integration
         if ! grep -q "use_modular_headers!" Podfile; then
           echo "Adding use_modular_headers! to Podfile"
-          # Add after the platform line
-          sed -i.bak2 "/platform :ios/a\\
-use_modular_headers!
-" Podfile
+          # Insert after the target line
+          awk '/^target/ && !done {print; print "  use_modular_headers!"; done=1; next} 1' Podfile > Podfile.tmp && mv Podfile.tmp Podfile
         fi
         
         echo "=== Updated Podfile ==="
-        cat Podfile
+        head -20 Podfile
     
     - name: Install CocoaPods
       run: |
