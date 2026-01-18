@@ -31,10 +31,22 @@ jobs:
     - name: Prebuild iOS project
       run: npx --yes @expo/cli prebuild --platform ios --clean
     
+    - name: Fix Podfile for compatibility
+      run: |
+        cd ios
+        # Remove the privacy_file_aggregation_enabled line if it exists
+        sed -i.bak '/:privacy_file_aggregation_enabled/d' Podfile
+        cat Podfile
+    
+    - name: Update CocoaPods
+      run: |
+        sudo gem install cocoapods
+        pod --version
+    
     - name: Install CocoaPods dependencies
       run: |
         cd ios
-        pod install
+        pod install --repo-update
     
     - name: Build unsigned archive
       run: |
