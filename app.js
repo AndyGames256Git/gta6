@@ -33,7 +33,7 @@ export default function App() {
       <StatusBar hidden />
       <Video
         ref={videoRef}
-        source={{ uri: 'https://download1640.mediafire.com/yafk06ilevzgQ8maoWV-6bS0tAffKtirtHVZljHCcGl70uwsmQRoW-SO4xRgg6qCvmUJa6-lvs5HNFxrjP6DTjzoW3kiwTfJf3F0QbJQAQpydNRMlXr0f20OyGO-SYCLrgq970fWC5LA34Gq-bXZiUqmFO5fqg9mpgy0WbXrCAf4fPU/5dg233z5peg3cq5/loading.mp4' }}
+        source={{ uri: 'https://player.vimeo.com/progressive_redirect/download/1155615114/container/5d252cf9-d778-475a-9e1c-f59f0d3b0d39/9493f39e-44eae870/loading%20%281080p%29.mp4?expires=1768837911&loc=external&signature=3c7cdbb3b40d48a92e37d3c0623aa341a0317b6c7518004314a25779ab74c935' }}
         style={styles.video}
         resizeMode={ResizeMode.COVER}
         shouldPlay
