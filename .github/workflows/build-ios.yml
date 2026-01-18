@@ -23,10 +23,19 @@ jobs:
       run: npm install
     
     - name: Install Expo CLI
-      run: npm install -g @expo/cli
+      run: |
+        npm install -g @expo/cli
+        echo "$(npm config get prefix)/bin" >> $GITHUB_PATH
+    
+    - name: Verify Expo installation
+      run: |
+        which expo || echo "Expo not in PATH yet"
+        npm list -g @expo/cli || true
     
     - name: Prebuild iOS project
-      run: expo prebuild --platform ios --clean
+      run: |
+        # Use npx with --yes flag to auto-install and run
+        npx --yes @expo/cli prebuild --platform ios --clean
     
     - name: Fix Podfile compatibility
       run: |
