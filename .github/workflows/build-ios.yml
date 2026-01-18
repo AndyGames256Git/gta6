@@ -48,11 +48,39 @@ jobs:
         cd ios
         pod install --repo-update
     
+    - name: Debug - List iOS directory contents
+      run: |
+        cd ios
+        echo "=== iOS directory contents ==="
+        ls -la
+        echo "=== Looking for workspace/project files ==="
+        find . -name "*.xcworkspace" -o -name "*.xcodeproj"
+    
     - name: Build unsigned archive
       run: |
         cd ios
-        xcodebuild -workspace LandscapeVideoApp.xcworkspace \
-          -scheme LandscapeVideoApp \
+        
+        # Find the workspace or project file
+        if [ -f *.xcworkspace/contents.xcworkspacedata ]; then
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          echo "Found workspace: $WORKSPACE"
+          BUILD_TARGET="-workspace $WORKSPACE"
+        elif [ -f *.xcodeproj/project.pbxproj ]; then
+          PROJECT=$(ls -d *.xcodeproj | head -n 1)
+          echo "Found project: $PROJECT"
+          BUILD_TARGET="-project $PROJECT"
+        else
+          echo "Error: No workspace or project found"
+          ls -la
+          exit 1
+        fi
+        
+        # Find the scheme name
+        SCHEME=$(xcodebuild -list $BUILD_TARGET | grep -A 1 "Schemes:" | tail -n 1 | xargs)
+        echo "Using scheme: $SCHEME"
+        
+        xcodebuild $BUILD_TARGET \
+          -scheme "$SCHEME" \
           -configuration Release \
           -sdk iphoneos \
           -destination 'generic/platform=iOS' \
